@@ -31,6 +31,13 @@ once it reaches `0.1.0`.
   this build phase — see the module's docstring for the intended orchestration pattern.
   `TrainerAdapter` now executes these three action kinds (previously always rejected at
   construction) when an `experiment_manager` is supplied.
+- `Evaluator`/`LossEvalSuite`: a minimal single-model evaluation contract — mean loss
+  over a held-out loader, an optional pass/fail threshold — for wiring into
+  `TrainerAdapter`'s `on_trigger_eval` hook and the branch-promotion eval gate. Restores
+  the model's prior train/eval mode afterward so a mid-training evaluation never leaves
+  it stuck in `eval()` for the next training step. The multi-controller comparison
+  harness and quality-vs-compute frontier stay Phase 3, once a real task exists to make
+  them meaningful.
 
 ### Fixed
 
