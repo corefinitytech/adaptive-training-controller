@@ -63,3 +63,5 @@ jobs:
       - run: uv sync --extra dev
       - name: Run minimal example for a few steps on CPU
         run: uv run python examples/minimal_pytorch_loop/run.py --smoke-test
+      - name: Run first-experiment example for a few steps on CPU
+        run: uv run python examples/first_experiment/run.py --smoke-test

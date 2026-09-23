@@ -38,6 +38,22 @@ once it reaches `0.1.0`.
   it stuck in `eval()` for the next training step. The multi-controller comparison
   harness and quality-vs-compute frontier stay Phase 3, once a real task exists to make
   them meaningful.
+- The research spec's §11 first experiment (`examples/first_experiment/`): a
+  from-scratch tiny character-level transformer trained on a real 200KB text corpus,
+  comparing `Fixed`/`RuleBased`/`Stateless`/`HistoryAware` with a fixed seed per
+  controller. This completes every Phase 1 item in the project plan. Also part of CI's
+  smoke job now (`--smoke-test`, ~8s).
+
+### Fixed
+
+- `examples/first_experiment`'s data sampler (`GroupWeightedSampler`) only re-read its
+  weights once per full epoch, and was sized to the whole dataset — far larger than the
+  run's entire step budget — so a reweight proposed mid-run had no batches left in the
+  "epoch" to actually affect; every controller produced bit-for-bit identical training
+  trajectories despite `stateless`/`history_aware` genuinely proposing (and having
+  approved) reweights. Sized the sampler's virtual epoch to roughly one interval's worth
+  of batches instead, so a reweight takes effect within about one interval of being
+  proposed, as the example's own README now shows with a real run's output.
 
 ### Fixed
 
