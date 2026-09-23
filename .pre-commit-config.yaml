@@ -1,0 +1,41 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (project env)
+        # Runs through `uv run` against the project's own environment rather than the
+        # mirror's isolated one, so it sees the same torch/pydantic/numpy versions (and
+        # therefore the same errors) as CI and every contributor's local `uv run mypy`
+        # — a separate isolated env with its own `additional_dependencies` list silently
+        # drifts from the real one and reports different errors than the real toolchain.
+        entry: uv run mypy src
+        language: system
+        types: [python]
+        files: ^src/
+        pass_filenames: false
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-merge-conflict
+
+  - repo: local
+    hooks:
+      - id: no-shortcuts
+        name: block stray TODO/FIXME/NotImplementedError in src/
+        language: pygrep
+        entry: '(TODO|FIXME|NotImplementedError)'
+        files: ^src/.*\.py$

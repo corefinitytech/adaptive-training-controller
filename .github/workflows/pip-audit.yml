@@ -1,0 +1,21 @@
+name: Dependency audit
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+  workflow_dispatch: {}
+
+jobs:
+  pip-audit:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.11"
+      - run: uv sync --extra dev
+      - run: uv run pip-audit
