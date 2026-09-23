@@ -17,6 +17,12 @@ once it reaches `0.1.0`.
 - `TrainerAdapter` / `AdaptiveTrainer` event-driven training loop with accelerator
   resolution (`cpu`/`mps`/`cuda`).
 - `FixedController` no-op baseline.
+- `RuleBasedController`, `StatelessController`, `HistoryAwareController`: three
+  deterministic controllers sharing one plateau-triggered reweighting rule
+  (`controllers/policies.py`), differing only in where the plateau signal and
+  precedent-checking come from — controller-owned memory, `TrainingState.recent_trend`,
+  and the experience store, respectively. Reachable via `Controller.rule_based()`,
+  `.stateless()`, `.history_aware()`.
 
 ### Fixed
 
