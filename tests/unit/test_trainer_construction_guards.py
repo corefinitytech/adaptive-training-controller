@@ -1,7 +1,7 @@
-"""`TrainerAdapter.__init__` rejects a misconfigured `ActionSpace`/hook combination up
-front, rather than letting the validator approve (and checkpoint!) a proposal that
-`_apply_action` can only crash on later. Regression tests for that construction-time
-guard — see `TrainerAdapter._validate_action_space`.
+"""`TrainerAdapter.__init__` rejects a misconfigured `ActionSpace`/hook/experiment_manager
+combination up front, rather than letting the validator approve (and checkpoint!) a
+proposal that `_apply_action` can only crash on later. Regression tests for that
+construction-time guard — see `TrainerAdapter._validate_action_space`.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import torch
 from corefinity_adaptive import ActionSpace, BudgetUsage
 from corefinity_adaptive.actions.types import ActionKind
 from corefinity_adaptive.controllers import Controller
+from corefinity_adaptive.experiments.manager import ExperimentManager
 from corefinity_adaptive.trainer.adapter import TrainerAdapter, UnsupportedActionError
 from tests.conftest import TinyRegressionModel, mse_loss
 
@@ -21,6 +22,7 @@ def _build(
     enabled_kinds: frozenset[ActionKind],
     on_reweight: object = None,
     on_trigger_eval: object = None,
+    experiment_manager: ExperimentManager | None = None,
 ) -> None:
     model = TinyRegressionModel()
     TrainerAdapter(
@@ -33,6 +35,7 @@ def _build(
         action_space=ActionSpace(enabled_kinds=enabled_kinds),
         on_reweight=on_reweight,  # type: ignore[arg-type]
         on_trigger_eval=on_trigger_eval,  # type: ignore[arg-type]
+        experiment_manager=experiment_manager,
     )
 
 
@@ -40,11 +43,17 @@ def _build(
     "kind",
     [ActionKind.BRANCH_EXPERIMENT, ActionKind.TERMINATE_BRANCH, ActionKind.ALLOCATE_COMPUTE],
 )
-def test_enabling_an_unimplemented_action_kind_is_rejected_at_construction(
-    kind: ActionKind,
-) -> None:
+def test_enabling_an_experiment_manager_kind_without_one_is_rejected(kind: ActionKind) -> None:
     with pytest.raises(UnsupportedActionError, match=kind.value):
         _build(enabled_kinds=frozenset({kind}))
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [ActionKind.BRANCH_EXPERIMENT, ActionKind.TERMINATE_BRANCH, ActionKind.ALLOCATE_COMPUTE],
+)
+def test_enabling_an_experiment_manager_kind_with_one_is_accepted(kind: ActionKind) -> None:
+    _build(enabled_kinds=frozenset({kind}), experiment_manager=ExperimentManager())
 
 
 def test_reweight_data_without_a_hook_is_rejected_at_construction() -> None:

@@ -23,6 +23,14 @@ once it reaches `0.1.0`.
   precedent-checking come from — controller-owned memory, `TrainingState.recent_trend`,
   and the experience store, respectively. Reachable via `Controller.rule_based()`,
   `.stateless()`, `.history_aware()`.
+- `ExperimentManager`: branch lineage/config/checkpoint/budget-allocation bookkeeping
+  for `BranchExperimentAction`/`TerminateBranchAction`/`AllocateComputeAction`, plus a
+  PBT-style exploit/explore step (`experiments/policy.py`: rank active branches by
+  score, terminate the bottom fraction, clone the top performer's checkpoint/config
+  into a new branch with a perturbed hyperparameter). Branches run *sequentially* in
+  this build phase — see the module's docstring for the intended orchestration pattern.
+  `TrainerAdapter` now executes these three action kinds (previously always rejected at
+  construction) when an `experiment_manager` is supplied.
 
 ### Fixed
 

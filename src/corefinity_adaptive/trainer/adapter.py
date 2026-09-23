@@ -37,6 +37,7 @@ from corefinity_adaptive.actions.types import (
 )
 from corefinity_adaptive.controllers.base import ControllerStrategy
 from corefinity_adaptive.device import resolve_device
+from corefinity_adaptive.experiments.manager import ExperimentManager
 from corefinity_adaptive.memory.query import ExperienceFilter
 from corefinity_adaptive.memory.records import ExperienceRecord
 from corefinity_adaptive.memory.sqlite_store import SQLiteExperienceStore
@@ -59,13 +60,13 @@ from corefinity_adaptive.validation.validator import ActionValidator, ValidatorS
 
 _logger = get_logger("trainer")
 
-_UNIMPLEMENTED_KINDS = frozenset(
+_EXPERIMENT_MANAGER_REQUIRED_KINDS = frozenset(
     {ActionKind.BRANCH_EXPERIMENT, ActionKind.TERMINATE_BRANCH, ActionKind.ALLOCATE_COMPUTE}
 )
-"""Kinds the validator can approve (and even checkpoint for) but `_apply_action` has no
-execution path for yet, pending `ExperimentManager`. Rejected at construction time (see
-`TrainerAdapter.__init__`) rather than left to crash `fit()` mid-run after a proposal for
-one of them has already been approved and checkpointed."""
+"""Kinds `_apply_action` can only execute by delegating to an `ExperimentManager`.
+Enabling one of these without supplying `experiment_manager` is rejected at construction
+time (see `TrainerAdapter.__init__`) rather than left to crash `fit()` mid-run after a
+proposal for one of them has already been approved and checkpointed."""
 
 
 class UnsupportedActionError(RuntimeError):
@@ -113,6 +114,13 @@ class TrainerAdapter:
     structurally cannot) retroactively seed `model`'s initial weights or `train_loader`'s
     shuffle order, since both are already constructed by the caller before this object
     exists. See the note in `fit()`.
+
+    `experiment_manager`, if supplied, must have been constructed with
+    `root_branch_id=branch_id` — `_apply_action` passes `TerminateBranchAction`'s and
+    `AllocateComputeAction`'s `branch_id` straight through to it, so a mismatch surfaces
+    as `UnknownBranchError` the first time this branch tries to act on itself. Branches
+    run sequentially in this build phase: creating one here only registers its metadata
+    as `PENDING` (see `ExperimentManager`'s docstring) — it does not start training it.
     """
 
     def __init__(
@@ -140,6 +148,7 @@ class TrainerAdapter:
         assess_fn: Callable[[Mapping[str, float]], Assessment] | None = None,
         comparison_group_id: str | None = None,
         rollback_policy: RollbackPolicy | None = None,
+        experiment_manager: ExperimentManager | None = None,
     ) -> None:
         self._model = model
         self._train_loader = train_loader
@@ -148,8 +157,12 @@ class TrainerAdapter:
         self._controller = controller
         self._action_space = action_space or ActionSpace()
         self._validate_action_space(
-            self._action_space, on_reweight=on_reweight, on_trigger_eval=on_trigger_eval
+            self._action_space,
+            on_reweight=on_reweight,
+            on_trigger_eval=on_trigger_eval,
+            experiment_manager=experiment_manager,
         )
+        self._experiment_manager = experiment_manager
         self._run_id = run_id or str(uuid4())
         self._branch_id = branch_id
         self._seed = seed
@@ -204,6 +217,7 @@ class TrainerAdapter:
         *,
         on_reweight: Callable[[Mapping[str, float]], None] | None,
         on_trigger_eval: Callable[[], bool] | None,
+        experiment_manager: ExperimentManager | None,
     ) -> None:
         """Reject at construction time any enabled kind `_apply_action` can't execute.
 
@@ -212,12 +226,11 @@ class TrainerAdapter:
         was already paid and the "approved" `ExperienceRecord` already persisted. See
         `UnsupportedActionError`.
         """
-        unimplemented = action_space.enabled_kinds & _UNIMPLEMENTED_KINDS
-        if unimplemented:
+        needs_experiment_manager = action_space.enabled_kinds & _EXPERIMENT_MANAGER_REQUIRED_KINDS
+        if needs_experiment_manager and experiment_manager is None:
             raise UnsupportedActionError(
-                f"action kind(s) {sorted(k.value for k in unimplemented)} are enabled "
-                "but have no execution path yet (ExperimentManager is not implemented "
-                "in this build phase) — remove them from ActionSpace.enabled_kinds"
+                f"action kind(s) {sorted(k.value for k in needs_experiment_manager)} are "
+                "enabled but no experiment_manager was provided to TrainerAdapter"
             )
         if ActionKind.REWEIGHT_DATA in action_space.enabled_kinds and on_reweight is None:
             raise UnsupportedActionError(
@@ -345,6 +358,13 @@ class TrainerAdapter:
                 pending_record_id = record.id
                 pending_pre_snapshot = snapshot
                 if isinstance(result.action, EarlyStopAction):
+                    stopped_early = True
+                    stop_reason = result.action.reason
+                elif (
+                    isinstance(result.action, TerminateBranchAction)
+                    and result.action.branch_id == self._branch_id
+                ):
+                    # This branch terminated itself — nothing left to train towards.
                     stopped_early = True
                     stop_reason = result.action.reason
 
@@ -490,12 +510,33 @@ class TrainerAdapter:
             return
         if isinstance(action, EarlyStopAction):
             return
-        if isinstance(
-            action, BranchExperimentAction | TerminateBranchAction | AllocateComputeAction
-        ):
-            raise UnsupportedActionError(
-                f"{action.kind} requires the ExperimentManager, not available in this build phase"
+        if isinstance(action, BranchExperimentAction):
+            if self._experiment_manager is None:
+                raise UnsupportedActionError(
+                    "BRANCH_EXPERIMENT was proposed but no experiment_manager was configured"
+                )
+            self._experiment_manager.create_branch(
+                parent_branch_id=action.parent_branch_id,
+                config_overrides=action.config_overrides,
+                checkpoint=self._checkpoint,
             )
+            return
+        if isinstance(action, TerminateBranchAction):
+            if self._experiment_manager is None:
+                raise UnsupportedActionError(
+                    "TERMINATE_BRANCH was proposed but no experiment_manager was configured"
+                )
+            self._experiment_manager.terminate_branch(action.branch_id, reason=action.reason)
+            return
+        if isinstance(action, AllocateComputeAction):
+            if self._experiment_manager is None:
+                raise UnsupportedActionError(
+                    "ALLOCATE_COMPUTE was proposed but no experiment_manager was configured"
+                )
+            self._experiment_manager.allocate_compute(
+                action.branch_id, additional_gpu_hours=action.additional_gpu_hours
+            )
+            return
         raise UnsupportedActionError(f"unhandled action kind: {action.kind}")
 
 
